@@ -19,17 +19,20 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -382,10 +385,23 @@ var _ = Describe("AgentRuntime Controller", func() {
 		})
 
 		AfterEach(func() {
+			// The AgentRuntime carries the kagenti.io/cleanup finalizer, so a bare
+			// Delete only sets a DeletionTimestamp; drive reconciles until the
+			// deletion reconcile removes the finalizer and the object is gone, so
+			// specs in this context do not leak state into each other.
+			r := newReconciler()
 			_ = k8sClient.Delete(ctx, rt)
+			Eventually(func() bool {
+				_, _ = r.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: "rt-no-target", Namespace: namespace},
+				})
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: "rt-no-target", Namespace: namespace},
+					&agentv1alpha1.AgentRuntime{})
+				return apierrors.IsNotFound(err)
+			}, "10s", "100ms").Should(BeTrue())
 		})
 
-		It("should set TargetNotFound condition", func() {
+		It("should set TargetNotFound condition and Ready=False", func() {
 			r := newReconciler()
 
 			// First reconcile: adds finalizer
@@ -402,16 +418,103 @@ var _ = Describe("AgentRuntime Controller", func() {
 			updated := &agentv1alpha1.AgentRuntime{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rt-no-target", Namespace: namespace}, updated)).To(Succeed())
 
-			var targetCond *metav1.Condition
-			for i := range updated.Status.Conditions {
-				if updated.Status.Conditions[i].Type == ConditionTypeTargetResolved {
-					targetCond = &updated.Status.Conditions[i]
-					break
-				}
-			}
+			targetCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeTargetResolved)
 			Expect(targetCond).NotTo(BeNil())
 			Expect(targetCond.Status).To(Equal(metav1.ConditionFalse))
 			Expect(targetCond.Reason).To(Equal("TargetNotFound"))
+
+			readyCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeReady)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal("TargetNotFound"))
+		})
+
+		It("should emit the TargetNotFound Warning event at most once across cycles", func() {
+			fakeRecorder := events.NewFakeRecorder(10)
+			r := &AgentRuntimeReconciler{
+				Client:    k8sClient,
+				APIReader: k8sClient,
+				Scheme:    scheme.Scheme,
+				Recorder:  fakeRecorder,
+			}
+			nn := types.NamespacedName{Name: "rt-no-target", Namespace: namespace}
+
+			// First reconcile: adds finalizer (no target resolution yet)
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			// Second reconcile: transitions into degraded -> should emit one event
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			// Third reconcile: already degraded -> should NOT emit another event
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+
+			// Drain the channel and count TargetNotFound Warning events.
+			count := 0
+			for len(fakeRecorder.Events) > 0 {
+				evt := <-fakeRecorder.Events
+				if strings.Contains(evt, "TargetNotFound") {
+					count++
+				}
+			}
+			Expect(count).To(Equal(1), "TargetNotFound event should be emitted only on transition")
+		})
+
+		It("should recover to Ready when the target is created", func() {
+			r := newReconciler()
+			nn := types.NamespacedName{Name: "rt-no-target", Namespace: namespace}
+
+			// Drive into degraded state.
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+
+			// Create the missing target, then reconcile again.
+			dep := newDeployment("nonexistent-deploy", namespace)
+			Expect(k8sClient.Create(ctx, dep)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, dep) }()
+
+			result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero(), "healthy reconcile should not requeue")
+
+			updated := &agentv1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, nn, updated)).To(Succeed())
+
+			targetCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeTargetResolved)
+			Expect(targetCond).NotTo(BeNil())
+			Expect(targetCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(targetCond.Reason).To(Equal("TargetFound"))
+
+			readyCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeReady)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(readyCond.Reason).To(Equal("Configured"))
+		})
+
+		It("should clear stale status.Card when the target is missing", func() {
+			r := newReconciler()
+			nn := types.NamespacedName{Name: "rt-no-target", Namespace: namespace}
+
+			// First reconcile: adds finalizer.
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+
+			// Simulate a card left over from when the target existed.
+			seed := &agentv1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, nn, seed)).To(Succeed())
+			seed.Status.Card = &agentv1alpha1.CardStatus{
+				AgentCardData: agentv1alpha1.AgentCardData{Name: "stale-agent"},
+				CardHash:      "sha256:deadbeef",
+			}
+			Expect(k8sClient.Status().Update(ctx, seed)).To(Succeed())
+
+			// Second reconcile: target still missing -> degraded path runs.
+			_, _ = r.Reconcile(ctx, reconcile.Request{NamespacedName: nn})
+
+			updated := &agentv1alpha1.AgentRuntime{}
+			Expect(k8sClient.Get(ctx, nn, updated)).To(Succeed())
+			Expect(updated.Status.Card).To(BeNil())
+
+			readyCond := meta.FindStatusCondition(updated.Status.Conditions, ConditionTypeReady)
+			Expect(readyCond).NotTo(BeNil())
+			Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyCond.Reason).To(Equal("TargetNotFound"))
 		})
 	})
 

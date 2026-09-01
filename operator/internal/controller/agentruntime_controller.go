@@ -21,6 +21,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -79,6 +80,11 @@ const (
 	ConditionTypeConfigResolved = "ConfigResolved"
 	ConditionTypeMTLSReady      = "MTLSReady"
 
+	// Condition reasons for AgentRuntime target resolution.
+	ReasonTargetFound        = "TargetFound"
+	ReasonTargetNotFound     = "TargetNotFound"
+	ReasonTargetResolveError = "TargetResolveError"
+
 	// AnnotationLastCardFetchHash stores the change-detection key used to skip
 	// redundant card fetches when the workload's pod template has not changed.
 	AnnotationLastCardFetchHash = "agent.rossoctl.dev/last-card-fetch-hash"
@@ -99,6 +105,12 @@ var sandboxGVK = schema.GroupVersionKind{
 	Version: "v1alpha1",
 	Kind:    KindSandbox,
 }
+
+// errTargetNotFound is a sentinel wrapped by resolveTargetRef when the target
+// workload referenced by spec.targetRef does not exist. Reconcile treats this
+// as a recoverable degraded state rather than an error, to avoid log/event
+// spam while the target is absent.
+var errTargetNotFound = errors.New("target workload not found")
 
 // AgentRuntimeReconciler reconciles AgentRuntime objects.
 type AgentRuntimeReconciler struct {
@@ -174,16 +186,37 @@ func (r *AgentRuntimeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// 4. Resolve targetRef (existence check)
 	if err := r.resolveTargetRef(ctx, rt); err != nil {
+		if errors.Is(err, errTargetNotFound) {
+			// Recoverable: the AgentRuntime outlives its target workload (e.g. the
+			// child Sandbox/Deployment was deleted directly). Treat as a degraded
+			// state instead of spamming Error logs / Warning events every cycle.
+			// Emit the Warning event only on transition into the degraded state,
+			// deduped via the pre-existing TargetResolved=False/TargetNotFound
+			// condition. Recovery is automatic once the target reappears.
+			prev := meta.FindStatusCondition(rt.Status.Conditions, ConditionTypeTargetResolved)
+			alreadyDegraded := prev != nil &&
+				prev.Status == metav1.ConditionFalse &&
+				prev.Reason == ReasonTargetNotFound
+
+			logger.V(1).Info("Target workload not found; AgentRuntime degraded", "error", err.Error())
+			r.setDegradedTargetNotFound(ctx, req.NamespacedName, err.Error())
+			if r.Recorder != nil && !alreadyDegraded {
+				r.Recorder.Eventf(rt, nil, corev1.EventTypeWarning, ReasonTargetNotFound,
+					"ResolveTarget", err.Error())
+			}
+			return ctrl.Result{RequeueAfter: 60 * time.Second}, nil
+		}
+		// Genuine API error resolving the target: keep the loud error path.
 		logger.Error(err, "Failed to resolve targetRef")
-		r.updateErrorStatus(ctx, req.NamespacedName, ConditionTypeTargetResolved, "TargetNotFound", err.Error())
+		r.updateErrorStatus(ctx, req.NamespacedName, ConditionTypeTargetResolved, ReasonTargetResolveError, err.Error())
 		if r.Recorder != nil {
-			r.Recorder.Eventf(rt, nil, corev1.EventTypeWarning, "TargetNotFound",
+			r.Recorder.Eventf(rt, nil, corev1.EventTypeWarning, ReasonTargetResolveError,
 				"ResolveTarget", err.Error())
 		}
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	r.setCondition(rt, ConditionTypeTargetResolved, metav1.ConditionTrue, "TargetFound",
+	r.setCondition(rt, ConditionTypeTargetResolved, metav1.ConditionTrue, ReasonTargetFound,
 		fmt.Sprintf("%s %s resolved", rt.Spec.TargetRef.Kind, rt.Spec.TargetRef.Name))
 
 	// 4.1. Complete two-phase Sandbox restart if pending.
@@ -348,7 +381,8 @@ func (r *AgentRuntimeReconciler) resolveTargetRef(ctx context.Context, rt *agent
 	key := client.ObjectKey{Namespace: rt.Namespace, Name: ref.Name}
 	if err := r.Get(ctx, key, acc.obj); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("%s/%s %s not found in namespace %s", ref.APIVersion, ref.Kind, ref.Name, rt.Namespace)
+			return fmt.Errorf("%s/%s %s not found in namespace %s: %w",
+				ref.APIVersion, ref.Kind, ref.Name, rt.Namespace, errTargetNotFound)
 		}
 		return err
 	}
@@ -886,6 +920,29 @@ func (r *AgentRuntimeReconciler) updateErrorStatus(ctx context.Context, key type
 		return r.Status().Update(ctx, latest)
 	}); statusErr != nil {
 		logger.Error(statusErr, "Failed to update error status", "condition", condType, "reason", reason)
+	}
+}
+
+// setDegradedTargetNotFound marks the AgentRuntime as degraded because its
+// target workload is missing: Ready=False and TargetResolved=False, both with
+// reason "TargetNotFound". It also clears status.Card, which was discovered
+// from the now-absent target and is therefore stale. Other conditions are
+// preserved. Recovery is automatic once the target reappears (see
+// SetupWithManager workload watches).
+func (r *AgentRuntimeReconciler) setDegradedTargetNotFound(ctx context.Context, key types.NamespacedName, message string) {
+	logger := log.FromContext(ctx)
+	if statusErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		latest := &agentv1alpha1.AgentRuntime{}
+		if err := r.Get(ctx, key, latest); err != nil {
+			return err
+		}
+		r.setCondition(latest, ConditionTypeTargetResolved, metav1.ConditionFalse, ReasonTargetNotFound, message)
+		r.setCondition(latest, ConditionTypeReady, metav1.ConditionFalse, ReasonTargetNotFound, message)
+		// The card was discovered from the now-absent target workload; clear it.
+		latest.Status.Card = nil
+		return r.Status().Update(ctx, latest)
+	}); statusErr != nil {
+		logger.Error(statusErr, "Failed to update degraded status", "reason", ReasonTargetNotFound)
 	}
 }
 
