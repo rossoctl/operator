@@ -66,10 +66,10 @@ var (
 	// Keep tags in sync with charts/operator/values.yaml (defaults.images.*) so
 	// e2e exercises the images the chart actually ships, not :latest.
 	sidecarImages = []string{
-		"ghcr.io/rossoctl/cortex/authbridge-envoy:v0.7.0-alpha.10",
-		"ghcr.io/rossoctl/cortex/authbridge:v0.7.0-alpha.10",
-		"ghcr.io/rossoctl/cortex/authbridge-lite:v0.7.0-alpha.10",
-		"ghcr.io/rossoctl/cortex/proxy-init:v0.7.0-alpha.10",
+		"ghcr.io/rossoctl/cortex/authbridge-envoy:v0.7.0-rc.1",
+		"ghcr.io/rossoctl/cortex/authbridge:v0.7.0-rc.1",
+		"ghcr.io/rossoctl/cortex/authbridge-lite:v0.7.0-rc.1",
+		"ghcr.io/rossoctl/cortex/proxy-init:v0.7.0-rc.1",
 	}
 )
 

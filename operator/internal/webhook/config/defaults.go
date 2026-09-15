@@ -36,18 +36,18 @@ func CompiledDefaults() *PlatformConfig {
 			// :latest on exactly the deploy paths the chart-layer pin doesn't cover.
 			// authbridge-envoy: combined image for envoy-sidecar mode
 			// (Envoy + ext_proc authbridge + spiffe-helper bundled).
-			EnvoyProxy: "ghcr.io/rossoctl/cortex/authbridge-envoy:v0.7.0-alpha.10",
+			EnvoyProxy: "ghcr.io/rossoctl/cortex/authbridge-envoy:v0.7.0-rc.1",
 			// authbridge: combined image for proxy-sidecar mode (default
 			// deployment shape) — authbridge-proxy + spiffe-helper
 			// bundled, no Envoy, no gRPC.
-			AuthBridge: "ghcr.io/rossoctl/cortex/authbridge:v0.7.0-alpha.10",
+			AuthBridge: "ghcr.io/rossoctl/cortex/authbridge:v0.7.0-rc.1",
 			// authbridge-lite: size-optimized variant for the "lite"
 			// mode. Same listener layout as AuthBridge but parsers
 			// (a2a/mcp/inference) are dropped.
-			AuthBridgeLite: "ghcr.io/rossoctl/cortex/authbridge-lite:v0.7.0-alpha.10",
+			AuthBridgeLite: "ghcr.io/rossoctl/cortex/authbridge-lite:v0.7.0-rc.1",
 			// proxy-init: iptables init container, used by
 			// envoy-sidecar mode only.
-			ProxyInit:  "ghcr.io/rossoctl/cortex/proxy-init:v0.7.0-alpha.10",
+			ProxyInit:  "ghcr.io/rossoctl/cortex/proxy-init:v0.7.0-rc.1",
 			PullPolicy: corev1.PullIfNotPresent,
 		},
 		Proxy: ProxyConfig{
