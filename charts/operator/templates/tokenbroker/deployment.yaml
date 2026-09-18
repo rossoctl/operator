@@ -1,0 +1,107 @@
+{{- if .Values.tokenBroker.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: token-broker
+  name: token-broker
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Sessions and the token cache are held in memory, so this must stay at 1.
+  # Scaling out requires shared state first; it is deliberately not a value.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: token-broker
+      {{- include "chart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: token-broker
+        {{- include "chart.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: token-broker
+      annotations:
+        # The broker terminates its own OAuth flows; no mesh sidecar required.
+        sidecar.istio.io/inject: "false"
+    spec:
+      containers:
+        - name: token-broker
+          # Same image as the manager unless explicitly overridden; ENTRYPOINT is
+          # /manager, so `command` is what selects this binary.
+          image: {{ .Values.tokenBroker.container.image.repository | default .Values.controllerManager.container.image.repository }}:{{ .Values.tokenBroker.container.image.tag | default .Values.controllerManager.container.image.tag }}
+          imagePullPolicy: {{ .Values.tokenBroker.container.image.pullPolicy | default .Values.controllerManager.container.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - {{ .Values.tokenBroker.container.cmd }}
+          ports:
+            - name: http
+              containerPort: 8190
+              protocol: TCP
+          env:
+            - name: TOKEN_BROKER_PORT
+              value: "8190"
+            - name: OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tokenBroker.oauth.existingSecret }}
+                  key: {{ .Values.tokenBroker.oauth.clientIdKey }}
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.tokenBroker.oauth.existingSecret }}
+                  key: {{ .Values.tokenBroker.oauth.clientSecretKey }}
+            # Host here MUST match httpRoute.hostname.
+            - name: OAUTH_CALLBACK_URL
+              value: {{ .Values.tokenBroker.oauth.callbackUrl | quote }}
+            - name: ALLOWED_REDIRECT_HOSTS
+              value: {{ .Values.tokenBroker.oauth.allowedRedirectHosts | quote }}
+            - name: RESOURCE_CONFIG
+              value: {{ .Values.tokenBroker.resourceConfig | quote }}
+            {{- with .Values.tokenBroker.oauth.authorizationEndpoint }}
+            - name: OAUTH_AUTHORIZATION_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.tokenBroker.oauth.tokenEndpoint }}
+            - name: OAUTH_TOKEN_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.tokenBroker.oauth.scopesSupported }}
+            - name: OAUTH_SCOPES_SUPPORTED
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.tokenBroker.jwt.jwksUrl }}
+            - name: JWT_JWKS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.tokenBroker.jwt.issuer }}
+            - name: JWT_ISSUER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.tokenBroker.jwt.audience }}
+            - name: JWT_AUDIENCE
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.tokenBroker.sessionTimeout }}
+            - name: TOKEN_BROKER_SESSION_TIMEOUT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.tokenBroker.maxSessionsPerUser }}
+            - name: TOKEN_BROKER_MAX_SESSIONS_PER_USER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.tokenBroker.tokenWaitTimeout }}
+            - name: TOKEN_BROKER_TOKEN_WAIT_TIMEOUT
+              value: {{ . | quote }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.tokenBroker.container.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.tokenBroker.container.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.tokenBroker.container.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.tokenBroker.container.securityContext | nindent 12 }}
+      securityContext:
+        {{- toYaml .Values.tokenBroker.securityContext | nindent 8 }}
+      serviceAccountName: {{ .Values.tokenBroker.serviceAccountName }}
+{{- end -}}

@@ -11,26 +11,43 @@ The bundle service serves OPA authorization bundles to AuthBridge clients over H
 ### Quick start (kind)
 
 ```bash
-./hack/bundle-service-kind.sh [cluster-name] [namespace]
+./hack/kind-reload-all.sh [cluster-name] [namespace]
 # Defaults: cluster=rossoctl, namespace=rossoctl-system
 ```
 
-This script builds the image, loads it into kind, installs the CRD, applies the default global policy CR, and deploys the service.
+Builds the operator image (which contains this binary), loads it into kind, and deploys
+all three services. It exercises the same image and the same `command: [/bundle-service]`
+selector that a real install uses, so there is no separate single-binary build to maintain.
 
-### Production manifests
+The controller-manager must already be installed (`make deploy`) — the script updates
+existing deployments rather than creating the operator from scratch.
 
-Deploy using the manifests in `operator/config/bundleservice/`:
+### Install (Helm)
 
-- `deployment.yaml`
-- `service.yaml`
-- `serviceaccount.yaml`
-- `rbac.yaml`
-- `networkpolicy.yaml`
-- `default-policy.yaml` — the default global `AuthorizationPolicy` CR
+The binary ships inside the operator image and is installed by the operator chart,
+gated off by default:
+
+```bash
+helm upgrade --install rossoctl-operator charts/operator \
+  --namespace rossoctl-system \
+  --set bundleService.enabled=true
+```
+
+Templates live in `charts/operator/templates/bundleservice/` — ServiceAccount,
+ClusterRole/Binding, Deployment, Service, NetworkPolicy, and the default global
+`AuthorizationPolicy` CR. Values are under `bundleService` in
+`charts/operator/values.yaml`.
+
+Enabling the component also installs the NetworkPolicy, independently of
+`networkPolicy.enable`: the service performs no in-process authorization and will
+serve any bundle named in `?spiffe=`, so that policy's ingress restriction to pods
+labelled `rossoctl.dev/authbridge: "true"` is the only access control there is. It
+requires a CNI that enforces NetworkPolicy — kind's default CNI does **not**, so
+treat a kind cluster as having none.
 
 Default deployment settings:
 
-- Namespace: `rossoctl-system`
+- Namespace: the release namespace
 - Deployment name: `bundle-service`
 - Service name: `bundle-service`
 - Port: `8080`
@@ -46,7 +63,11 @@ kubectl apply -f config/crd/bases/agent.rossoctl.dev_authorizationpolicies.yaml
 The default global policy CR must be applied for the service to produce valid bundles:
 
 ```bash
-kubectl apply -f config/bundleservice/default-policy.yaml
+helm template rossoctl-operator charts/operator \
+  --namespace rossoctl-system \
+  --set bundleService.enabled=true \
+  --show-only templates/bundleservice/default-policy.yaml \
+  | kubectl apply -f -
 ```
 
 ### Runtime configuration
@@ -106,7 +127,7 @@ Structured logs via `log/slog`. Key log events:
 
 ## Global policy CR
 
-The default global `AuthorizationPolicy` CR (`config/bundleservice/default-policy.yaml`) defines the decision logic for all four OPA query paths. It determines how namespace and client tiers are combined.
+The default global `AuthorizationPolicy` CR (`charts/operator/templates/bundleservice/default-policy.yaml`) defines the decision logic for all four OPA query paths. It determines how namespace and client tiers are combined.
 
 Platform engineers can customize this CR to:
 
@@ -129,7 +150,7 @@ Monitor:
 
 ## Related resources
 
-- `operator/config/bundleservice/` — deployment manifests and default policy
+- `charts/operator/templates/bundleservice/` — chart templates and the default policy
 - `operator/config/crd/bases/agent.rossoctl.dev_authorizationpolicies.yaml` — CRD definition
 - `operator/internal/bundleservice/` — service implementation
 

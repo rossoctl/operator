@@ -99,26 +99,3 @@ jobs:
           go-version-file: operator/go.mod
       - name: Build
         run: make build
-
-  # token-broker is a separate Go module. The workflow-level
-  # defaults.run.working-directory pins every other job to `operator`, so
-  # nothing here compiled this module — it shipped in v0.4.0-rc.1 with an
-  # unresolvable authlib requirement (rossoctl/operator#537). This job builds
-  # and tests it so that cannot recur silently.
-  test-token-broker:
-    name: Token Broker Build & Tests
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: token-broker
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
-        with:
-          go-version-file: token-broker/go.mod
-      - name: Build
-        run: go build ./...
-      - name: Vet
-        run: go vet ./...
-      - name: Run tests
-        run: go test ./...

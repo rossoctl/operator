@@ -29,7 +29,7 @@ The `Verifier` interface in `internal/bundleservice/identity/` is the extension 
 
 The service collects policies from `AuthorizationPolicy` CRs and packages them into the bundle payload.
 
-- **Global policies** — `scope: global`, must reside in the service namespace (`rossoctl-system`). These declare the OPA query entry-point packages (e.g., `package authbridge.inbound.request`) and contain the decision logic that combines namespace and client tiers.
+- **Global policies** — `scope: global`, must reside in the service namespace (the Helm release namespace, `rossoctl-system` by default). These declare the OPA query entry-point packages (e.g., `package authbridge.inbound.request`) and contain the decision logic that combines namespace and client tiers.
 - **Namespace policies** — `scope: namespace`, scoped to the namespace from the client's SPIFFE ID.
 - **Client policies** — `scope: client`, scoped to the CR whose name and namespace match the SPIFFE ID.
 
@@ -46,7 +46,7 @@ The global CR's Rego declares these packages directly. Namespace and client poli
 
 ### Default decision logic
 
-The default global CR (`config/bundleservice/default-policy.yaml`) implements:
+The default global CR (`charts/operator/templates/bundleservice/default-policy.yaml`) implements:
 
 ```
 allow if ns.override
@@ -134,14 +134,14 @@ Response headers for `200 OK`:
 Example request:
 
 ```bash
-curl -v 'http://bundle-service.rossoctl-system.svc.cluster.local:8080/bundles?spiffe=localtest.me/ns/default/sa/my-agent'
+curl -v 'http://bundle-service.<namespace>.svc.cluster.local:8080/bundles?spiffe=localtest.me/ns/default/sa/my-agent'
 ```
 
 ETag example:
 
 ```bash
 curl -v -H 'If-None-Match: "sha256:abc123..."' \
-  'http://bundle-service.rossoctl-system.svc.cluster.local:8080/bundles?spiffe=localtest.me/ns/default/sa/my-agent'
+  'http://bundle-service.<namespace>.svc.cluster.local:8080/bundles?spiffe=localtest.me/ns/default/sa/my-agent'
 ```
 
 ### GET /healthz
