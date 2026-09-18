@@ -1,0 +1,56 @@
+{{- if .Values.bundleService.enabled }}
+# This NetworkPolicy is the ONLY access control on bundle-service: the server
+# performs no in-process authorization and will serve any bundle named in the
+# ?spiffe= query param. It is therefore installed with the component rather
+# than behind `networkPolicy.enable`. Requires a CNI that enforces
+# NetworkPolicy — kind's default CNI does not.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bundle-service
+  name: bundle-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: bundle-service
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only allow traffic from pods with the authbridge label
+    - from:
+        - podSelector:
+            matchLabels:
+              rossoctl.dev/authbridge: "true"
+          namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8080
+  egress:
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Allow access to the Kubernetes API server. The API server IP is
+    # cluster-specific, so this is deliberately broad.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+{{- end -}}

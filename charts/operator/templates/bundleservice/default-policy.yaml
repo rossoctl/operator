@@ -1,0 +1,73 @@
+{{- if .Values.bundleService.enabled }}
+# Mandatory bootstrap data, not an example. These four Rego entry points are the
+# packages AuthBridge's OPA evaluates; each is `default allow := false`, and
+# namespace/client-scope CRs are modifiers layered on top. Without this CR the
+# packages do not exist and every decision fails closed.
+#
+# Must live in the service's own namespace: watcher.go ignores global-scope CRs
+# from any other namespace, logging only a warning.
+apiVersion: agent.rossoctl.dev/v1alpha1
+kind: AuthorizationPolicy
+metadata:
+  name: default
+  namespace: {{ .Release.Namespace }}
+spec:
+  scope: global
+  policies:
+    - path: "inbound/request.rego"
+      content: |
+        package authbridge.inbound.request
+        import rego.v1
+        default allow := false
+        allow if data.authbridge.ns.inbound.request.override
+        allow if {
+            ns_ok
+            client_ok
+        }
+        ns_ok if data.authbridge.ns.inbound.request.allow
+        ns_ok if not data.authbridge.ns.inbound.request
+        client_ok if data.authbridge.client.inbound.request.allow
+        client_ok if not data.authbridge.client.inbound.request
+    - path: "inbound/response.rego"
+      content: |
+        package authbridge.inbound.response
+        import rego.v1
+        default allow := false
+        allow if data.authbridge.ns.inbound.response.override
+        allow if {
+            ns_ok
+            client_ok
+        }
+        ns_ok if data.authbridge.ns.inbound.response.allow
+        ns_ok if not data.authbridge.ns.inbound.response
+        client_ok if data.authbridge.client.inbound.response.allow
+        client_ok if not data.authbridge.client.inbound.response
+    - path: "outbound/request.rego"
+      content: |
+        package authbridge.outbound.request
+        import rego.v1
+        default allow := false
+        allow if data.authbridge.ns.outbound.request.override
+        allow if {
+            ns_ok
+            client_ok
+        }
+        ns_ok if data.authbridge.ns.outbound.request.allow
+        ns_ok if not data.authbridge.ns.outbound.request
+        client_ok if data.authbridge.client.outbound.request.allow
+        client_ok if not data.authbridge.client.outbound.request
+    - path: "outbound/response.rego"
+      content: |
+        package authbridge.outbound.response
+        import rego.v1
+        default allow := false
+        allow if data.authbridge.ns.outbound.response.override
+        allow if {
+            ns_ok
+            client_ok
+        }
+        ns_ok if data.authbridge.ns.outbound.response.allow
+        ns_ok if not data.authbridge.ns.outbound.response
+        client_ok if data.authbridge.client.outbound.response.allow
+        client_ok if not data.authbridge.client.outbound.response
+{{- end -}}

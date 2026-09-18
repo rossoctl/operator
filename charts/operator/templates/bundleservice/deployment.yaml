@@ -1,0 +1,57 @@
+{{- if .Values.bundleService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bundle-service
+  name: bundle-service
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.bundleService.replicas }}
+  selector:
+    matchLabels:
+      app: bundle-service
+      {{- include "chart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app: bundle-service
+        {{- include "chart.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: bundle-service
+    spec:
+      containers:
+        - name: bundle-service
+          # Same image as the manager unless explicitly overridden; ENTRYPOINT is
+          # /manager, so `command` is what selects this binary.
+          image: {{ .Values.bundleService.container.image.repository | default .Values.controllerManager.container.image.repository }}:{{ .Values.bundleService.container.image.tag | default .Values.controllerManager.container.image.tag }}
+          imagePullPolicy: {{ .Values.bundleService.container.image.pullPolicy | default .Values.controllerManager.container.image.pullPolicy | default "IfNotPresent" }}
+          command:
+            - {{ .Values.bundleService.container.cmd }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # Scopes which global-scope AuthorizationPolicy CRs are honoured:
+            # the watcher ignores global CRs outside the service's own namespace.
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- range $key, $value := .Values.bundleService.container.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.bundleService.container.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.bundleService.container.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.bundleService.container.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.bundleService.container.securityContext | nindent 12 }}
+      securityContext:
+        {{- toYaml .Values.bundleService.securityContext | nindent 8 }}
+      serviceAccountName: {{ .Values.bundleService.serviceAccountName }}
+{{- end -}}

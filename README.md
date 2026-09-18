@@ -99,17 +99,71 @@ The operator runs the following controllers and webhooks:
 
 Rossoctl includes a dedicated bundle service used by AuthBridge clients to fetch authorization bundles.
 
-This service is deployed using the manifests in `operator/config/bundleservice/` and is intended for SRE operational use.
+The service ships inside the operator image and is **opt-in**. Enable it at install time:
+
+```sh
+helm install rossoctl-operator ... --set bundleService.enabled=true
+```
 
 Key facts:
 
 - Deployment name: `bundle-service`
-- Namespace: `system`
+- Namespace: the release namespace
 - Service type: `ClusterIP`
 - Port: `8080`
 - Health endpoints: `/healthz`, `/readyz`
 
-Use `operator/operator/cmd/bundle-service/README.md` for SRE runbook guidance and operational details.
+Enabling it also installs a NetworkPolicy restricting callers to pods labelled
+`rossoctl.dev/authbridge: "true"`. This is the service's **only** access control — it
+performs no in-process authorization and serves any bundle named in the `?spiffe=` query
+param — so it is installed with the component rather than behind `networkPolicy.enable`.
+Note that it only takes effect on a cluster whose CNI enforces NetworkPolicy; kind's
+default CNI does not.
+
+Use `operator/cmd/bundle-service/README.md` for SRE runbook guidance and operational details.
+
+## Token Broker
+
+The Token Broker enables HITL (Human-in-the-Loop) authorization: when an agent needs
+permissions beyond those in its own token, the broker runs an OAuth 2.0 PKCE flow to
+obtain just-in-time, user-scoped credentials.
+
+It also ships inside the operator image and is **opt-in**:
+
+```sh
+helm install rossoctl-operator ... \
+  --set tokenBroker.enabled=true
+```
+
+Key facts:
+
+- Deployment name: `token-broker`
+- Namespace: the release namespace
+- Service type: `ClusterIP`
+- Port: `8190`
+- Health endpoints: `/healthz`, `/readyz`
+- Replicas: fixed at 1 — sessions and the token cache are in-memory, so scaling out
+  requires shared state first
+
+OAuth client credentials are **not** templated by the chart. Create the Secret out of
+band and point `tokenBroker.oauth.existingSecret` at it:
+
+```sh
+kubectl create secret generic github-oauth-credentials -n rossoctl-system \
+  --from-literal=client-id=<CLIENT_ID> --from-literal=client-secret=<CLIENT_SECRET>
+```
+
+The chart also installs an HTTPRoute for the OAuth callback. Its hostname defaults to
+`token-broker.localtest.me`, which works out of the box on a kind/dev cluster; the host
+in `tokenBroker.oauth.callbackUrl` **must** match it, or the provider's post-consent
+redirect 404s and the broker waits for a callback that never arrives. Override both for
+real deployments, or set `tokenBroker.httpRoute.enabled=false` and route the callback
+yourself.
+
+For production, set `tokenBroker.jwt.*` — incoming JWTs are not verified when those are
+left unset.
+
+See `operator/cmd/token-broker/README.md` for the API reference and operational details.
 
 ## Quick Start
 

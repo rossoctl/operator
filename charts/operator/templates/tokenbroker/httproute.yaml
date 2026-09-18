@@ -1,0 +1,33 @@
+{{- if and .Values.tokenBroker.enabled .Values.tokenBroker.httpRoute.enabled }}
+# Exposes the OAuth callback through the shared gateway. The provider redirects
+# the user's browser to oauth.callbackUrl after authorization; that URL must
+# resolve to GET /oauth/callback here, or the redirect 404s and the broker waits
+# for a callback that never arrives.
+#
+# hostname MUST match the host in tokenBroker.oauth.callbackUrl. Both default to
+# kind/dev values — override for production.
+#
+# Same-namespace backendRef, so no ReferenceGrant is required.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: token-broker
+  name: token-broker-oauth-callback
+  namespace: {{ .Release.Namespace }}
+spec:
+  parentRefs:
+    - name: {{ .Values.tokenBroker.httpRoute.gateway.name }}
+      namespace: {{ .Values.tokenBroker.httpRoute.gateway.namespace | default .Release.Namespace }}
+  hostnames:
+    - {{ .Values.tokenBroker.httpRoute.hostname | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /oauth/callback
+      backendRefs:
+        - name: token-broker
+          port: 8190
+{{- end -}}
