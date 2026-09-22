@@ -142,8 +142,13 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
+build: manifests generate fmt vet ## Build manager, bundle-service and token-broker binaries.
+	# All three ship in the operator image (see Dockerfile), so all three are
+	# built here: a break confined to one of the secondary main packages would
+	# otherwise pass CI and only surface during the image build.
 	go build -o bin/manager cmd/main.go
+	go build -o bin/bundle-service ./cmd/bundle-service/
+	go build -o bin/token-broker ./cmd/token-broker/
 
 # Self-signed TLS for the validating webhook when running outside the cluster (controller-runtime
 # otherwise expects tls.crt/tls.key under $TMPDIR/k8s-webhook-server/serving-certs).

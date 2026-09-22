@@ -46,6 +46,155 @@ controllerManager:
   terminationGracePeriodSeconds: 10
   serviceAccountName: controller-manager
 
+# [BUNDLE SERVICE]: OPA authorization policy bundle server (opt-in)
+#
+# Serves composed OPA policy bundles assembled from AuthorizationPolicy CRs to
+# the cortex-side `opa` AuthBridge plugin. Ships in the operator image and is
+# selected by `cmd` below, so it always matches the manager's version.
+#
+# SECURITY: the service performs no in-process authorization (it serves any
+# bundle requested via ?spiffe=) and listens on plain HTTP. The NetworkPolicy
+# templated alongside it is the ONLY access control, restricting callers to
+# pods labelled `rossoctl.dev/authbridge: "true"`. It is therefore installed
+# whenever this component is enabled, independently of `networkPolicy.enable`.
+# It only takes effect on a cluster whose CNI enforces NetworkPolicy — kind's
+# default CNI does NOT, so treat a kind cluster as having no access control.
+bundleService:
+  enabled: false
+  replicas: 1
+  container:
+    # Runs out of the operator image, so the image is inherited from
+    # controllerManager.container.image and there is no second tag to pin
+    # (release.yml rewrites only the manager's tag). Override repository/tag
+    # here only to run a separately built bundle-service image.
+    image: {}
+    cmd: /bundle-service
+    resources:
+      # No CPU limit: bundle builds are bursty and CPU-throttling them adds
+      # latency to every AuthBridge policy fetch.
+      limits:
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    livenessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      httpGet:
+        path: /healthz
+        port: http
+    readinessProbe:
+      initialDelaySeconds: 2
+      periodSeconds: 5
+      httpGet:
+        path: /readyz
+        port: http
+    securityContext:
+      allowPrivilegeEscalation: false
+      # The binary writes nothing to disk; bundles are assembled in memory.
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - "ALL"
+  securityContext:
+    runAsNonRoot: true
+  serviceAccountName: bundle-service
+
+# [TOKEN BROKER]: OAuth session and token broker (opt-in)
+#
+# Brokers OAuth authorization-code flows on behalf of agents and caches the
+# resulting tokens for AuthBridge's tokenbroker plugin. Ships in the operator
+# image and is selected by `cmd` below, so it always matches the manager's
+# version.
+#
+# Calls no Kubernetes API, so it needs no Role/RoleBinding — only an identity.
+tokenBroker:
+  enabled: false
+  container:
+    # Runs out of the operator image; see the note on bundleService.container.image.
+    image: {}
+    cmd: /token-broker
+    resources:
+      limits:
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    livenessProbe:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      httpGet:
+        path: /healthz
+        port: http
+    readinessProbe:
+      initialDelaySeconds: 2
+      periodSeconds: 5
+      httpGet:
+        path: /readyz
+        port: http
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - "ALL"
+  securityContext:
+    runAsNonRoot: true
+  serviceAccountName: token-broker
+
+  # OAuth client credentials. The chart does NOT create this Secret — create it
+  # out of band so credentials never pass through values or Helm release state:
+  #   kubectl create secret generic github-oauth-credentials -n <ns> \
+  #     --from-literal=client-id=<ID> --from-literal=client-secret=<SECRET>
+  # (or wire it to ExternalSecrets / Vault).
+  oauth:
+    existingSecret: github-oauth-credentials
+    clientIdKey: client-id
+    clientSecretKey: client-secret
+    # Externally-reachable callback URL. Its host MUST match httpRoute.hostname
+    # below, or the provider's redirect 404s and the broker waits for a callback
+    # that never arrives. The default is a kind/dev value — override for real
+    # deployments.
+    callbackUrl: "http://token-broker.localtest.me:8080/oauth/callback"
+    # Permitted hostnames for backend_session_redirect_url. Comma-separated.
+    allowedRedirectHosts: "app-demo.localtest.me"
+    # Skip OAuth discovery by configuring endpoints directly (optional).
+    authorizationEndpoint: ""
+    tokenEndpoint: ""
+    scopesSupported: ""
+
+  # JWT validation of incoming requests. Leave unset for dev/test; REQUIRED for
+  # production, otherwise incoming JWTs are not verified.
+  jwt:
+    jwksUrl: ""
+    issuer: ""
+    audience: ""
+
+  # Per-resource-server OAuth config (scopes + endpoint overrides), JSON.
+  # Each key is the resource server URL and must match X-Server-Url exactly.
+  # The default points at the demo MCP server; override for real use.
+  resourceConfig: |
+    {
+      "http://mcp-server-service.rossoctl-demo.svc.cluster.local:8184": {"scopes": ["read:user", "user:email"]}
+    }
+
+  # Optional tunables; defaults live in cmd/token-broker/main.go.
+  sessionTimeout: ""
+  maxSessionsPerUser: ""
+  tokenWaitTimeout: ""
+
+  # HTTPRoute exposing the OAuth callback through the shared gateway. Defaults
+  # are kind/dev values that work out of the box; hostname MUST match the host
+  # in oauth.callbackUrl above. Override both for production, or set
+  # enabled: false and route the callback yourself.
+  httpRoute:
+    enabled: true
+    hostname: token-broker.localtest.me
+    gateway:
+      name: http
+      # Defaults to the release namespace when empty.
+      namespace: ""
+
 # [RBAC]: To enable RBAC (Permissions) configurations
 rbac:
   enable: true

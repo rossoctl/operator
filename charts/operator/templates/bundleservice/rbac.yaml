@@ -1,0 +1,36 @@
+{{- if and .Values.rbac.enable .Values.bundleService.enabled }}
+# The service watches AuthorizationPolicy CRs cluster-wide to compose bundles.
+# list+watch only: it serves from an informer cache and never writes status.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bundle-service
+  name: rossoctl-bundle-service
+rules:
+- apiGroups:
+  - agent.rossoctl.dev
+  resources:
+  - authorizationpolicies
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bundle-service
+  name: rossoctl-bundle-service
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: rossoctl-bundle-service
+subjects:
+- kind: ServiceAccount
+  name: {{ .Values.bundleService.serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+{{- end -}}
