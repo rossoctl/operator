@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agenttrust-evaluation-config
+data:
+  AGENT_URL: "http://weather-agent.agents.svc:8000"
+  AGENTTRUST_NUM_PROBES: "5"
+  AGENTTRUST_TRACE_SOURCE: "none"
+  MLFLOW_EXPERIMENT_NAME: "agenttrust-evaluations"
+  CLAUDE_CONFIG_DIR: "/work"
