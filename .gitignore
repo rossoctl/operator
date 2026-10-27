@@ -66,3 +66,6 @@ Dockerfile.cross
 !.specify/memory/
 .specify/memory/*
 !.specify/memory/constitution.md
+
+# Local MCP client configuration (may contain credentials)
+.mcp.json
