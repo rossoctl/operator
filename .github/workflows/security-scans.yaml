@@ -151,7 +151,7 @@ jobs:
           done
 
       - name: Install yq
-        uses: mikefarah/yq@504fc38780cc46be8444ea1b72fb55919fc0bfb0  # v4
+        uses: mikefarah/yq@a4330671f17776618660a419ab2531e4f4dc48b6  # v4
 
       - name: Guard — AuthBridge injection images must be version-pinned (no floating tags)
         # Catches a :latest / floating-tag regression at PR-review time rather than
@@ -259,16 +259,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d  # v4
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066  # v4
         with:
           languages: go
           queries: security-extended
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@24c54180a607b1449ed407dd24f251e4e9147c8d  # v4
+        uses: github/codeql-action/autobuild@33d7b85da1a04171e211befe2c739303b9a4c066  # v4
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d  # v4
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066  # v4
         with:
           category: "/language:go"
 

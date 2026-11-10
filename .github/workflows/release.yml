@@ -48,7 +48,7 @@ jobs:
       uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4
 
     - name: Log in to ghcr.io
-      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
+      uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -94,10 +94,10 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Install yq
-      uses: mikefarah/yq@504fc38780cc46be8444ea1b72fb55919fc0bfb0  # v4
+      uses: mikefarah/yq@a4330671f17776618660a419ab2531e4f4dc48b6  # v4
 
     - name: Log in to ghcr.io
-      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
+      uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550  # v4
       with:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
@@ -169,7 +169,7 @@ jobs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
 
     - name: Create Kind cluster
-      uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa  # v1.15.1
+      uses: helm/kind-action@ea822c7bf1874f08e5a491df991c228edffc3376  # v1.15.2
 
     - name: Install cert-manager
       run: |
